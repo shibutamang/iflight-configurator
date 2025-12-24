@@ -23,7 +23,8 @@ class _RCMonitorScreenState extends State<RCMonitorScreen> {
 
   void _startRefresh() {
     final provider = Provider.of<FlightControllerProvider>(context, listen: false);
-    _refreshTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
+    // Fast polling for smooth real-time updates (50ms = 20 FPS)
+    _refreshTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) {
       if (provider.state.isConnected) {
         provider.refreshRCData();
       }
@@ -209,10 +210,6 @@ class _RCMonitorScreenState extends State<RCMonitorScreen> {
   }
 
   Widget _buildChannelRow(String label, int value, IconData icon) {
-    // Normalize to 0-1 range (1000-2000 μs)
-    double normalized = (value - RCConfig.minValue) / (RCConfig.maxValue - RCConfig.minValue);
-    normalized = normalized.clamp(0.0, 1.0);
-
     Color barColor = AppColors.primary;
     if (value < RCConfig.minValue || value > RCConfig.maxValue) {
       barColor = AppColors.danger;
@@ -239,65 +236,146 @@ class _RCMonitorScreenState extends State<RCMonitorScreen> {
           ),
           Expanded(
             flex: 2,
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final centerPosition = ((RCConfig.centerValue - RCConfig.minValue) /
-                    (RCConfig.maxValue - RCConfig.minValue)) * constraints.maxWidth;
-                
-                return Stack(
-                  children: [
-                    // Background track
-                    Container(
-                      height: 16,
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(3),
-                        border: Border.all(color: AppColors.divider.withOpacity(0.5)),
-                      ),
-                    ),
-                    // Fill bar
-                    Container(
-                      height: 16,
-                      width: normalized * constraints.maxWidth,
-                      decoration: BoxDecoration(
-                        color: barColor.withOpacity(0.8),
-                        borderRadius: BorderRadius.circular(3),
-                      ),
-                    ),
-                    // Center marker
-                    Positioned(
-                      left: centerPosition - 1,
-                      child: Container(
-                        width: 2,
-                        height: 16,
-                        color: AppColors.textPrimary.withOpacity(0.2),
-                      ),
-                    ),
-                  ],
-                );
-              },
+            child: _AnimatedChannelBar(
+              value: value,
+              barColor: barColor,
             ),
           ),
           const SizedBox(width: 8),
-          Container(
-            width: 58,
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-            decoration: BoxDecoration(
-              color: barColor.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              '$value μs',
-              style: TextStyle(
-                color: barColor,
-                fontWeight: FontWeight.w600,
-                fontSize: 10,
-              ),
-              textAlign: TextAlign.center,
-            ),
+          TweenAnimationBuilder<int>(
+            tween: IntTween(begin: value, end: value),
+            duration: const Duration(milliseconds: 50),
+            builder: (context, animatedValue, child) {
+              return Container(
+                width: 58,
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                decoration: BoxDecoration(
+                  color: barColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  '$animatedValue μs',
+                  style: TextStyle(
+                    color: barColor,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 10,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              );
+            },
           ),
         ],
       ),
+    );
+  }
+}
+
+// Animated channel bar widget for smooth transitions
+class _AnimatedChannelBar extends StatefulWidget {
+  final int value;
+  final Color barColor;
+
+  const _AnimatedChannelBar({
+    required this.value,
+    required this.barColor,
+  });
+
+  @override
+  State<_AnimatedChannelBar> createState() => _AnimatedChannelBarState();
+}
+
+class _AnimatedChannelBarState extends State<_AnimatedChannelBar>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+  double _currentValue = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentValue = widget.value.toDouble();
+    
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 50),
+      vsync: this,
+    );
+    
+    _animation = Tween<double>(
+      begin: _currentValue,
+      end: _currentValue,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.linear));
+  }
+
+  @override
+  void didUpdateWidget(_AnimatedChannelBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    
+    if (oldWidget.value != widget.value) {
+      _animation = Tween<double>(
+        begin: _animation.value,
+        end: widget.value.toDouble(),
+      ).animate(CurvedAnimation(parent: _controller, curve: Curves.linear));
+      
+      _controller.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        // Normalize to 0-1 range (1000-2000 μs)
+        double normalized = (_animation.value - RCConfig.minValue) / 
+            (RCConfig.maxValue - RCConfig.minValue);
+        normalized = normalized.clamp(0.0, 1.0);
+
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final centerPosition = ((RCConfig.centerValue - RCConfig.minValue) /
+                (RCConfig.maxValue - RCConfig.minValue)) * constraints.maxWidth;
+            
+            return Stack(
+              children: [
+                // Background track
+                Container(
+                  height: 16,
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(3),
+                    border: Border.all(color: AppColors.divider.withOpacity(0.5)),
+                  ),
+                ),
+                // Fill bar - animated width
+                Container(
+                  height: 16,
+                  width: normalized * constraints.maxWidth,
+                  decoration: BoxDecoration(
+                    color: widget.barColor.withOpacity(0.8),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+                // Center marker
+                Positioned(
+                  left: centerPosition - 1,
+                  child: Container(
+                    width: 2,
+                    height: 16,
+                    color: AppColors.textPrimary.withOpacity(0.2),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }

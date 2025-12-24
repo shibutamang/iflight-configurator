@@ -16,7 +16,7 @@ class _IMUScreenState extends State<IMUScreen> {
   double _staticRoll = 15.0;
   double _staticPitch = -10.0;
   double _staticYaw = 30.0;
-  bool _useStaticValues = true;
+  bool _useStaticValues = false;
 
   @override
   Widget build(BuildContext context) {

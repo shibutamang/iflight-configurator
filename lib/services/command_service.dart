@@ -303,7 +303,11 @@ class CommandService {
   
   // RC Commands
   Future<RCInputData?> getRCData() async {
-    MSPPacket? response = await _sendCommand(MSPCommands.mspRc);
+    // Use fast timeout for real-time RC data
+    MSPPacket? response = await _sendCommand(
+      MSPCommands.mspRc,
+      timeoutMs: Timeouts.fastCommand,
+    );
     if (response == null || response.data.length < 16) {
       return null;
     }
