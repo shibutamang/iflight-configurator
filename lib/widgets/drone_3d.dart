@@ -2,7 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../utils/app_colors.dart';
 
-class Drone3D extends StatelessWidget {
+class Drone3D extends StatefulWidget {
   final double roll;  // degrees
   final double pitch; // degrees
   final double yaw;   // degrees
@@ -15,31 +15,111 @@ class Drone3D extends StatelessWidget {
   });
 
   @override
+  State<Drone3D> createState() => _Drone3DState();
+}
+
+class _Drone3DState extends State<Drone3D> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _rollAnimation;
+  late Animation<double> _pitchAnimation;
+  late Animation<double> _yawAnimation;
+  
+  double _currentRoll = 0;
+  double _currentPitch = 0;
+  double _currentYaw = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentRoll = widget.roll;
+    _currentPitch = widget.pitch;
+    _currentYaw = widget.yaw;
+    
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 50), // Match polling rate for real-time feel
+      vsync: this,
+    );
+    
+    _rollAnimation = Tween<double>(begin: _currentRoll, end: _currentRoll).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.linear),
+    );
+    _pitchAnimation = Tween<double>(begin: _currentPitch, end: _currentPitch).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.linear),
+    );
+    _yawAnimation = Tween<double>(begin: _currentYaw, end: _currentYaw).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.linear),
+    );
+  }
+
+  @override
+  void didUpdateWidget(Drone3D oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    
+    if (oldWidget.roll != widget.roll || 
+        oldWidget.pitch != widget.pitch || 
+        oldWidget.yaw != widget.yaw) {
+      // Animate from current animated value to new target
+      _rollAnimation = Tween<double>(
+        begin: _rollAnimation.value,
+        end: widget.roll,
+      ).animate(CurvedAnimation(parent: _controller, curve: Curves.linear));
+      
+      _pitchAnimation = Tween<double>(
+        begin: _pitchAnimation.value,
+        end: widget.pitch,
+      ).animate(CurvedAnimation(parent: _controller, curve: Curves.linear));
+      
+      // Handle yaw wraparound (e.g., 350° to 10° should go through 360°, not back through 180°)
+      double yawDiff = widget.yaw - _yawAnimation.value;
+      if (yawDiff > 180) yawDiff -= 360;
+      if (yawDiff < -180) yawDiff += 360;
+      
+      _yawAnimation = Tween<double>(
+        begin: _yawAnimation.value,
+        end: _yawAnimation.value + yawDiff,
+      ).animate(CurvedAnimation(parent: _controller, curve: Curves.linear));
+      
+      _controller.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        gradient: const LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Color(0xFF1a1a2e), // Dark blue-gray
-            Color(0xFF16213e), // Darker blue
-            Color(0xFF0f0f1a), // Near black
-          ],
-        ),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: CustomPaint(
-          painter: Drone3DPainter(
-            roll: roll,
-            pitch: pitch,
-            yaw: yaw,
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            gradient: const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Color(0xFF1a1a2e), // Dark blue-gray
+                Color(0xFF16213e), // Darker blue
+                Color(0xFF0f0f1a), // Near black
+              ],
+            ),
           ),
-          size: const Size(double.infinity, double.infinity),
-        ),
-      ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: CustomPaint(
+              painter: Drone3DPainter(
+                roll: _rollAnimation.value,
+                pitch: _pitchAnimation.value,
+                yaw: _yawAnimation.value,
+              ),
+              size: const Size(double.infinity, double.infinity),
+            ),
+          ),
+        );
+      },
     );
   }
 }

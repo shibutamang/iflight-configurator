@@ -32,8 +32,9 @@ class SerialConfig {
 
 // Timeouts (milliseconds)
 class Timeouts {
-  static const int standardCommand = 1200;
-  static const int calibration = 2000;
+  static const int fastCommand = 100;      // For real-time data (attitude)
+  static const int standardCommand = 500;  // For normal commands
+  static const int calibration = 2000;     // For calibration operations
   static const int reset = 1000;
 }
 

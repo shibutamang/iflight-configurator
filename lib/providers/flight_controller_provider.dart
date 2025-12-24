@@ -12,8 +12,9 @@ class FlightControllerProvider extends ChangeNotifier {
   
   FlightControllerState _state = FlightControllerState();
   StreamSubscription? _statusSubscription;
-  Timer? _statusTimer;
-  int _updateCounter = 0;
+  Timer? _attitudeTimer;  // Fast timer for attitude (smooth animation)
+  Timer? _statusTimer;    // Slower timer for other status
+  int _statusCounter = 0;
   
   FlightControllerState get state => _state;
   
@@ -27,26 +28,55 @@ class FlightControllerProvider extends ChangeNotifier {
       // Handle specific responses if needed
     });
     
-    // Periodic status updates - reduced frequency to prevent overwhelming FC
-    _statusTimer = Timer.periodic(const Duration(milliseconds: 250), (timer) {
-      if (_state.isConnected && !_isUpdating) {
-        _updateStatus();
+    // Fast attitude updates for smooth animation (every 50ms = 20 FPS)
+    _attitudeTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) {
+      if (_state.isConnected && !_isUpdatingAttitude) {
+        _updateAttitude();
+      }
+    });
+    
+    // Slower status updates for other data (every 500ms)
+    _statusTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) {
+      if (_state.isConnected && !_isUpdatingStatus) {
+        _updateOtherStatus();
       }
     });
   }
   
-  bool _isUpdating = false;
+  bool _isUpdatingAttitude = false;
+  bool _isUpdatingStatus = false;
   
-  Future<void> _updateStatus() async {
-    // Prevent overlapping updates
-    if (_isUpdating) {
-      return;
-    }
-    
-    _isUpdating = true;
+  // Fast attitude update - called frequently for smooth animation
+  Future<void> _updateAttitude() async {
+    if (_isUpdatingAttitude) return;
+    _isUpdatingAttitude = true;
     
     try {
-      // Get status (includes sensor health) - most important, do first
+      final attitude = await _commandService.getAttitude();
+      if (attitude != null) {
+        _state = _state.copyWith(
+          roll: attitude['roll']!,
+          pitch: attitude['pitch']!,
+          yaw: attitude['yaw']!,
+        );
+        notifyListeners();
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error updating attitude: $e');
+      }
+    } finally {
+      _isUpdatingAttitude = false;
+    }
+  }
+  
+  // Slower status update - called less frequently
+  Future<void> _updateOtherStatus() async {
+    if (_isUpdatingStatus) return;
+    _isUpdatingStatus = true;
+    
+    try {
+      // Get status (includes sensor health)
       final status = await _commandService.getStatus();
       if (status != null) {
         _state = _state.copyWith(
@@ -62,18 +92,8 @@ class FlightControllerProvider extends ChangeNotifier {
         );
       }
       
-      // Get attitude - critical for IMU display
-      final attitude = await _commandService.getAttitude();
-      if (attitude != null) {
-        _state = _state.copyWith(
-          roll: attitude['roll']!,
-          pitch: attitude['pitch']!,
-          yaw: attitude['yaw']!,
-        );
-      }
-      
-      // Get battery (less frequent - every 5 updates)
-      if (_updateCounter % 5 == 0) {
+      // Get battery (less frequent - every 4 status updates = ~2 seconds)
+      if (_statusCounter % 4 == 0) {
         final battery = await _commandService.getBattery();
         if (battery != null) {
           _state = _state.copyWith(
@@ -82,16 +102,15 @@ class FlightControllerProvider extends ChangeNotifier {
           );
         }
       }
-      _updateCounter++;
+      _statusCounter++;
       
       notifyListeners();
     } catch (e) {
-      // Log error for debugging (in debug mode)
       if (kDebugMode) {
         print('Error updating status: $e');
       }
     } finally {
-      _isUpdating = false;
+      _isUpdatingStatus = false;
     }
   }
   
@@ -277,6 +296,7 @@ class FlightControllerProvider extends ChangeNotifier {
   
   @override
   void dispose() {
+    _attitudeTimer?.cancel();
     _statusTimer?.cancel();
     _statusSubscription?.cancel();
     super.dispose();

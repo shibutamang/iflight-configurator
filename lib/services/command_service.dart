@@ -216,7 +216,11 @@ class CommandService {
   }
   
   Future<Map<String, double>?> getAttitude() async {
-    MSPPacket? response = await _sendCommand(MSPCommands.mspAttitude);
+    // Use fast timeout for real-time attitude data
+    MSPPacket? response = await _sendCommand(
+      MSPCommands.mspAttitude, 
+      timeoutMs: Timeouts.fastCommand,
+    );
     if (response == null || response.data.length < 6) {
       return null;
     }

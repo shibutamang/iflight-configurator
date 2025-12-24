@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
-class AirbusAttitudeIndicator extends StatelessWidget {
+class AirbusAttitudeIndicator extends StatefulWidget {
   final double roll;  // degrees
   final double pitch; // degrees
 
@@ -12,26 +12,88 @@ class AirbusAttitudeIndicator extends StatelessWidget {
   });
 
   @override
+  State<AirbusAttitudeIndicator> createState() => _AirbusAttitudeIndicatorState();
+}
+
+class _AirbusAttitudeIndicatorState extends State<AirbusAttitudeIndicator> 
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _rollAnimation;
+  late Animation<double> _pitchAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 50), // Match polling rate for real-time feel
+      vsync: this,
+    );
+    
+    _rollAnimation = Tween<double>(begin: widget.roll, end: widget.roll).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.linear),
+    );
+    _pitchAnimation = Tween<double>(begin: widget.pitch, end: widget.pitch).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.linear),
+    );
+  }
+
+  @override
+  void didUpdateWidget(AirbusAttitudeIndicator oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    
+    if (oldWidget.roll != widget.roll || oldWidget.pitch != widget.pitch) {
+      // Handle roll wraparound for smooth animation
+      double rollDiff = widget.roll - _rollAnimation.value;
+      if (rollDiff > 180) rollDiff -= 360;
+      if (rollDiff < -180) rollDiff += 360;
+      
+      _rollAnimation = Tween<double>(
+        begin: _rollAnimation.value,
+        end: _rollAnimation.value + rollDiff,
+      ).animate(CurvedAnimation(parent: _controller, curve: Curves.linear));
+      
+      _pitchAnimation = Tween<double>(
+        begin: _pitchAnimation.value,
+        end: widget.pitch,
+      ).animate(CurvedAnimation(parent: _controller, curve: Curves.linear));
+      
+      _controller.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1A1A),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: const Color(0xFF4A4A4A),
-          width: 3,
-        ),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(5),
-        child: CustomPaint(
-          painter: AirbusAttitudePainter(
-            roll: roll,
-            pitch: pitch,
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A1A1A),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: const Color(0xFF4A4A4A),
+              width: 3,
+            ),
           ),
-          size: const Size(double.infinity, double.infinity),
-        ),
-      ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(5),
+            child: CustomPaint(
+              painter: AirbusAttitudePainter(
+                roll: _rollAnimation.value,
+                pitch: _pitchAnimation.value,
+              ),
+              size: const Size(double.infinity, double.infinity),
+            ),
+          ),
+        );
+      },
     );
   }
 }
