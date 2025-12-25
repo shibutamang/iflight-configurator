@@ -12,8 +12,8 @@ class FlightControllerProvider extends ChangeNotifier {
   
   FlightControllerState _state = FlightControllerState();
   StreamSubscription? _statusSubscription;
-  Timer? _attitudeTimer;  // Fast timer for attitude (smooth animation)
-  Timer? _statusTimer;    // Slower timer for other status
+  Timer? _attitudeTimer;
+  Timer? _statusTimer;
   int _statusCounter = 0;
   
   FlightControllerState get state => _state;
@@ -23,7 +23,6 @@ class FlightControllerProvider extends ChangeNotifier {
   }
   
   void _startStatusUpdates() {
-    // Listen to command responses
     _commandService.responseStream.listen((packet) {
       // Handle specific responses if needed
     });
@@ -46,7 +45,6 @@ class FlightControllerProvider extends ChangeNotifier {
   bool _isUpdatingAttitude = false;
   bool _isUpdatingStatus = false;
   
-  // Fast attitude update - called frequently for smooth animation
   Future<void> _updateAttitude() async {
     if (_isUpdatingAttitude) return;
     _isUpdatingAttitude = true;
@@ -62,21 +60,17 @@ class FlightControllerProvider extends ChangeNotifier {
         notifyListeners();
       }
     } catch (e) {
-      if (kDebugMode) {
-        print('Error updating attitude: $e');
-      }
+      // Silently handle errors
     } finally {
       _isUpdatingAttitude = false;
     }
   }
   
-  // Slower status update - called less frequently
   Future<void> _updateOtherStatus() async {
     if (_isUpdatingStatus) return;
     _isUpdatingStatus = true;
     
     try {
-      // Get status (includes sensor health)
       final status = await _commandService.getStatus();
       if (status != null) {
         _state = _state.copyWith(
@@ -84,7 +78,6 @@ class FlightControllerProvider extends ChangeNotifier {
           motorTestMode: status['motorTestMode'] as bool,
           cycleTime: status['cycleTime'] as int,
           i2cErrors: status['i2cErrors'] as int,
-          // Sensor health
           gyroHealthy: status['gyroHealthy'] as bool? ?? true,
           accHealthy: status['accHealthy'] as bool? ?? false,
           baroHealthy: status['baroHealthy'] as bool? ?? false,
@@ -92,7 +85,6 @@ class FlightControllerProvider extends ChangeNotifier {
         );
       }
       
-      // Get battery (less frequent - every 4 status updates = ~2 seconds)
       if (_statusCounter % 4 == 0) {
         final battery = await _commandService.getBattery();
         if (battery != null) {
@@ -106,9 +98,7 @@ class FlightControllerProvider extends ChangeNotifier {
       
       notifyListeners();
     } catch (e) {
-      if (kDebugMode) {
-        print('Error updating status: $e');
-      }
+      // Silently handle errors
     } finally {
       _isUpdatingStatus = false;
     }
@@ -118,13 +108,8 @@ class FlightControllerProvider extends ChangeNotifier {
     bool success = await _serialService.connect(portName);
     if (success) {
       _state = _state.copyWith(isConnected: true);
-      
-      // Wait a bit for serial connection to stabilize
       await Future.delayed(const Duration(milliseconds: 200));
-      
-      // Get initial data
       await refreshAll();
-      
       notifyListeners();
     }
     return success;
@@ -140,27 +125,11 @@ class FlightControllerProvider extends ChangeNotifier {
     if (!_state.isConnected) return;
     
     try {
-      if (kDebugMode) {
-        print('Refreshing all data from FC...');
-      }
-      
-      // Get version
-      if (kDebugMode) {
-        print('Requesting firmware version...');
-      }
       final version = await _commandService.getVersion();
       if (version != null) {
-        if (kDebugMode) {
-          print('Got firmware version: $version');
-        }
         _state = _state.copyWith(firmwareVersion: version);
-      } else {
-        if (kDebugMode) {
-          print('Failed to get firmware version');
-        }
       }
       
-      // Get status (includes sensor health)
       final status = await _commandService.getStatus();
       if (status != null) {
         _state = _state.copyWith(
@@ -168,7 +137,6 @@ class FlightControllerProvider extends ChangeNotifier {
           motorTestMode: status['motorTestMode'] as bool,
           cycleTime: status['cycleTime'] as int,
           i2cErrors: status['i2cErrors'] as int,
-          // Sensor health
           gyroHealthy: status['gyroHealthy'] as bool? ?? true,
           accHealthy: status['accHealthy'] as bool? ?? false,
           baroHealthy: status['baroHealthy'] as bool? ?? false,
@@ -176,7 +144,6 @@ class FlightControllerProvider extends ChangeNotifier {
         );
       }
       
-      // Get battery
       final battery = await _commandService.getBattery();
       if (battery != null) {
         _state = _state.copyWith(
@@ -185,7 +152,6 @@ class FlightControllerProvider extends ChangeNotifier {
         );
       }
       
-      // Get attitude
       final attitude = await _commandService.getAttitude();
       if (attitude != null) {
         _state = _state.copyWith(
@@ -195,25 +161,21 @@ class FlightControllerProvider extends ChangeNotifier {
         );
       }
       
-      // Get PID config
       final pidConfig = await _commandService.getPIDConfig();
       if (pidConfig != null) {
         _state = _state.copyWith(pidConfig: pidConfig);
       }
       
-      // Get RC data
       final rcData = await _commandService.getRCData();
       if (rcData != null) {
         _state = _state.copyWith(rcData: rcData);
       }
       
-      // Get motor status
       final motorStatus = await _commandService.getMotorStatus();
       if (motorStatus != null) {
         _state = _state.copyWith(motorStatus: motorStatus);
       }
       
-      // Get calibration data
       final calibration = await _commandService.getCalibrationData();
       if (calibration != null) {
         _state = _state.copyWith(calibration: calibration);
@@ -271,15 +233,37 @@ class FlightControllerProvider extends ChangeNotifier {
   }
   
   Future<bool> calibrateGyro() async {
+    // Pause polling during calibration
+    _attitudeTimer?.cancel();
+    _statusTimer?.cancel();
+    
+    // Wait a moment for any in-flight commands to complete
+    await Future.delayed(const Duration(milliseconds: 100));
+    
     bool success = await _commandService.calibrateGyro();
+    
+    // Resume polling
+    _startStatusUpdates();
+    
     if (success) {
       await refreshAll();
     }
     return success;
   }
-  
+
   Future<bool> calibrateAccel() async {
+    // Pause polling during calibration
+    _attitudeTimer?.cancel();
+    _statusTimer?.cancel();
+    
+    // Wait a moment for any in-flight commands to complete
+    await Future.delayed(const Duration(milliseconds: 100));
+    
     bool success = await _commandService.calibrateAccel();
+    
+    // Resume polling
+    _startStatusUpdates();
+    
     if (success) {
       await refreshAll();
     }
@@ -302,4 +286,3 @@ class FlightControllerProvider extends ChangeNotifier {
     super.dispose();
   }
 }
-

@@ -34,8 +34,9 @@ class RCInputData {
     int aux1 = unpackU16(8);
     int aux2 = unpackU16(10);
     
-    // Check if signal is valid (all zeros means no signal)
-    bool valid = roll != 0 || pitch != 0 || throttle != 0 || yaw != 0;
+    // Check if signal is valid
+    // Per MSP spec: all channels are 0 when no RC signal is present
+    bool allZero = roll == 0 && pitch == 0 && throttle == 0 && yaw == 0;
     
     return RCInputData(
       roll: roll,
@@ -44,7 +45,7 @@ class RCInputData {
       yaw: yaw,
       aux1: aux1,
       aux2: aux2,
-      signalValid: valid,
+      signalValid: !allZero,  // Valid if any channel is non-zero
     );
   }
 }

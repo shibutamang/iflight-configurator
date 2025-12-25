@@ -31,21 +31,15 @@ class CommandService {
 
   void _handleIncomingData(Uint8List data) {
     _buffer.addAll(data);
-    if (kDebugMode) {
-      print('[MSP] RX raw (${data.length} bytes): ${_bytesToHex(data)}');
-    }
     
     // Prevent buffer overflow - clear if too large (indicates corruption)
     if (_buffer.length > 1024) {
-      if (kDebugMode) {
-        print('Buffer overflow detected, clearing buffer');
-      }
       _buffer.clear();
       return;
     }
     
     // Try to parse complete packets
-    int maxIterations = 100; // Prevent infinite loops
+    int maxIterations = 100;
     int iterations = 0;
     
     while (_buffer.isNotEmpty && iterations < maxIterations) {
@@ -78,15 +72,13 @@ class CommandService {
       
       // Validate data size (MSP max is 64 bytes)
       if (dataSize > 64) {
-        // Invalid packet, skip header byte
         _buffer.removeAt(0);
         continue;
       }
       
-      int packetLength = 6 + dataSize; // header(3) + size(1) + cmd(1) + data + checksum(1)
+      int packetLength = 6 + dataSize;
       
       if (_buffer.length < packetLength) {
-        // Wait for more data
         break;
       }
       
@@ -98,22 +90,11 @@ class CommandService {
       try {
         MSPPacket? packet = MSPProtocol.parseResponse(packetBytes);
         if (packet != null) {
-          if (kDebugMode) {
-          print('[MSP] Parsed response cmd=${packet.commandId}, data=${packet.data.length} bytes');
-          }
           _responseController.add(packet);
         }
       } catch (e) {
-        // Invalid packet, continue to next
-        if (kDebugMode) {
-          print('Failed to parse packet: $e');
-        }
         continue;
       }
-    }
-    
-    if (iterations >= maxIterations && kDebugMode) {
-      print('Max iterations reached in packet parsing');
     }
   }
   
@@ -122,21 +103,11 @@ class CommandService {
       return null;
     }
     
-    // Build request
     Uint8List packetData = MSPProtocol.buildRequest(commandId, data: data);
-    if (kDebugMode) {
-      print('[MSP] TX cmd=$commandId, bytes=${packetData.length}: ${_bytesToHex(packetData)}');
-    }
 
     bool writeSuccess = await _serialService.write(packetData);
     if (!writeSuccess) {
-      if (kDebugMode) {
-        print('[MSP] Write failed for cmd=$commandId');
-      }
       return null;
-    }
-    if (kDebugMode) {
-      print('[MSP] Sent command: $commandId');
     }
 
     // Wait for response
@@ -157,9 +128,6 @@ class CommandService {
     timeoutTimer = Timer(Duration(milliseconds: timeoutMs), () {
       subscription?.cancel();
       if (!completer.isCompleted) {
-        if (kDebugMode) {
-          print('[MSP] Timeout waiting for command: $commandId');
-        }
         completer.complete(null);
       }
     });
@@ -186,12 +154,10 @@ class CommandService {
     int i2cErrors = MSPProtocol.unpackU16(response.data, 2);
     int sensorFlags = MSPProtocol.unpackU16(response.data, 4);
     
-    // Parse sensor flags (bits indicate sensor presence)
     bool accPresent = (sensorFlags & 0x01) != 0;
     bool baroPresent = (sensorFlags & 0x02) != 0;
     bool magPresent = (sensorFlags & 0x04) != 0;
     
-    // System flags (uint32)
     int systemFlags = response.data[6] |
         (response.data[7] << 8) |
         (response.data[8] << 16) |
@@ -206,17 +172,14 @@ class CommandService {
       'sensorFlags': sensorFlags,
       'isArmed': isArmed,
       'motorTestMode': motorTestMode,
-      // Parsed sensor health
       'accHealthy': accPresent,
       'baroHealthy': baroPresent,
       'magHealthy': magPresent,
-      // Gyro is always assumed present (required for flight)
       'gyroHealthy': true,
     };
   }
   
   Future<Map<String, double>?> getAttitude() async {
-    // Use fast timeout for real-time attitude data
     MSPPacket? response = await _sendCommand(
       MSPCommands.mspAttitude, 
       timeoutMs: Timeouts.fastCommand,
@@ -230,7 +193,7 @@ class CommandService {
     int yaw = MSPProtocol.unpackS16(response.data, 4);
     
     return {
-      'roll': roll / 10.0, // Convert from 1/10 degrees to degrees
+      'roll': roll / 10.0,
       'pitch': pitch / 10.0,
       'yaw': yaw / 10.0,
     };
@@ -238,21 +201,14 @@ class CommandService {
   
   // Battery Commands
   Future<Map<String, dynamic>?> getBattery() async {
-    // Try MSP_ANALOG (110) - standard MultiWii/Betaflight command
     MSPPacket? response = await _sendCommand(MSPCommands.mspAnalog);
     if (response == null) {
       return null;
     }
     
-    // MSP_ANALOG typically returns: voltage (uint8_t * 0.1V), current (uint16_t * 0.01A)
-    // But check data length to handle different formats
     if (response.data.length >= 1) {
-      // Voltage is typically first byte as uint8_t representing 0.1V increments
       int voltageRaw = response.data[0];
-      double voltage = voltageRaw * 0.1; // Convert to volts
-      
-      // Calculate percentage (assuming 3S LiPo: 12.6V = 100%, 9.0V = 0%)
-      // This is a rough estimate - adjust based on your battery configuration
+      double voltage = voltageRaw * 0.1;
       int percentage = _calculateBatteryPercentage(voltage);
       
       return {
@@ -264,24 +220,19 @@ class CommandService {
     return null;
   }
   
-  // Helper to calculate battery percentage from voltage
-  // Assumes LiPo: 4.2V per cell (full) to 3.0V per cell (empty)
   int _calculateBatteryPercentage(double voltage) {
     if (voltage <= 0) return 0;
     
-    // Estimate cell count based on voltage
     int cells = (voltage / 4.2).ceil();
     if (cells < 1) cells = 1;
     if (cells > 6) cells = 6;
     
-    // Full voltage per cell: 4.2V, Empty: 3.0V
     double fullVoltage = cells * 4.2;
     double emptyVoltage = cells * 3.0;
     
     if (voltage >= fullVoltage) return 100;
     if (voltage <= emptyVoltage) return 0;
     
-    // Linear interpolation
     double percentage = ((voltage - emptyVoltage) / (fullVoltage - emptyVoltage)) * 100;
     return percentage.round().clamp(0, 100);
   }
@@ -303,7 +254,6 @@ class CommandService {
   
   // RC Commands
   Future<RCInputData?> getRCData() async {
-    // Use fast timeout for real-time RC data
     MSPPacket? response = await _sendCommand(
       MSPCommands.mspRc,
       timeoutMs: Timeouts.fastCommand,
@@ -345,10 +295,83 @@ class CommandService {
   
   // Calibration Commands
   Future<bool> calibrateGyro() async {
-    MSPPacket? response = await _sendCommand(
-      MSPCommands.mspCompGyro,
-      timeoutMs: Timeouts.calibration,
-    );
+    if (kDebugMode) {
+      print('[GYRO_CAL] Starting gyro calibration...');
+      print('[GYRO_CAL] Command ID: ${MSPCommands.mspCompGyro}');
+    }
+    
+    // Build and log the request packet
+    Uint8List packetData = MSPProtocol.buildRequest(MSPCommands.mspCompGyro);
+    if (kDebugMode) {
+      print('[GYRO_CAL] TX packet (${packetData.length} bytes): ${_bytesToHex(packetData)}');
+    }
+    
+    bool writeSuccess = await _serialService.write(packetData);
+    if (kDebugMode) {
+      print('[GYRO_CAL] Write success: $writeSuccess');
+    }
+    
+    if (!writeSuccess) {
+      if (kDebugMode) {
+        print('[GYRO_CAL] Failed to send command');
+      }
+      return false;
+    }
+    
+    // Listen for RAW serial data to see if FC responds at all
+    StreamSubscription? rawSubscription;
+    rawSubscription = _serialService.dataStream.listen((data) {
+      if (kDebugMode) {
+        print('[GYRO_CAL] RAW RX (${data.length} bytes): ${_bytesToHex(data)}');
+      }
+    });
+    
+    // Wait for response with logging
+    final completer = Completer<MSPPacket?>();
+    StreamSubscription? subscription;
+    Timer? timeoutTimer;
+    
+    subscription = responseStream.listen((packet) {
+      if (kDebugMode) {
+        print('[GYRO_CAL] Parsed response - cmd: ${packet.commandId}, data length: ${packet.data.length}');
+        if (packet.data.isNotEmpty) {
+          print('[GYRO_CAL] Response data: ${packet.data}');
+        }
+      }
+      
+      if (packet.commandId == MSPCommands.mspCompGyro) {
+        if (kDebugMode) {
+          print('[GYRO_CAL] Got matching response!');
+        }
+        subscription?.cancel();
+        rawSubscription?.cancel();
+        timeoutTimer?.cancel();
+        if (!completer.isCompleted) {
+          completer.complete(packet);
+        }
+      }
+    });
+    
+    timeoutTimer = Timer(Duration(milliseconds: Timeouts.calibration), () {
+      subscription?.cancel();
+      rawSubscription?.cancel();
+      if (!completer.isCompleted) {
+        if (kDebugMode) {
+          print('[GYRO_CAL] Timeout after ${Timeouts.calibration}ms - FC did not respond');
+        }
+        completer.complete(null);
+      }
+    });
+    
+    MSPPacket? response = await completer.future;
+    
+    if (kDebugMode) {
+      print('[GYRO_CAL] Calibration result: ${response != null ? "SUCCESS" : "FAILED"}');
+      if (response == null) {
+        print('[GYRO_CAL] NOTE: FC may not support MSP_COMP_GYRO (200). Check FC firmware.');
+      }
+    }
+    
     return response != null;
   }
   

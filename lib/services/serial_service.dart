@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:typed_data';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_libserialport/flutter_libserialport.dart';
 import '../utils/constants.dart';
 
@@ -27,22 +26,11 @@ class SerialService {
         await disconnect();
       }
       
-      if (kDebugMode) {
-        print('[SERIAL] Opening port: $portName');
-      }
-      
       _port = SerialPort(portName);
       
       // Open port FIRST, then configure
       if (!_port!.openReadWrite()) {
-        if (kDebugMode) {
-          print('[SERIAL] Failed to open port: ${SerialPort.lastError}');
-        }
         return false;
-      }
-      
-      if (kDebugMode) {
-        print('[SERIAL] Port opened successfully');
       }
       
       // Configure AFTER opening
@@ -55,12 +43,6 @@ class SerialService {
       
       _port!.config = config;
       
-      // Verify config was applied
-      final appliedConfig = _port!.config;
-      if (kDebugMode) {
-        print('[SERIAL] Config applied - Baud: ${appliedConfig.baudRate}, Bits: ${appliedConfig.bits}, Stop: ${appliedConfig.stopBits}, Parity: ${appliedConfig.parity}');
-      }
-      
       // Drain any stale data in the buffer
       try {
         _port!.drain();
@@ -71,40 +53,18 @@ class SerialService {
       
       // Start listening for incoming data
       _reader = SerialPortReader(_port!);
-      if (kDebugMode) {
-        print('[SERIAL] Reader created, starting to listen...');
-      }
       
       _subscription = _reader!.stream.listen(
         (data) {
-          if (kDebugMode) {
-            final hex = data.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
-            print('[SERIAL] RX (${data.length} bytes): $hex');
-          }
           _dataController.add(data);
         },
         onError: (error) {
-          if (kDebugMode) {
-            print('[SERIAL] RX Error: $error');
-          }
           _dataController.addError(error);
-        },
-        onDone: () {
-          if (kDebugMode) {
-            print('[SERIAL] Reader stream closed');
-          }
         },
       );
       
-      if (kDebugMode) {
-        print('[SERIAL] Connection complete, ready for communication');
-      }
-      
       return true;
     } catch (e) {
-      if (kDebugMode) {
-        print('[SERIAL] Connect error: $e');
-      }
       return false;
     }
   }
@@ -121,37 +81,13 @@ class SerialService {
   
   Future<bool> write(Uint8List data) async {
     if (!isConnected) {
-      if (kDebugMode) {
-        print('[SERIAL] Write failed - not connected');
-      }
       return false;
     }
     
     try {
-      if (kDebugMode) {
-        final hex = data.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
-        print('[SERIAL] TX (${data.length} bytes): $hex');
-      }
-      
-      // write() returns number of bytes written
       int bytesWritten = _port!.write(data);
-      
-      if (kDebugMode) {
-        print('[SERIAL] TX result: $bytesWritten of ${data.length} bytes written');
-      }
-      
-      if (bytesWritten != data.length) {
-        if (kDebugMode) {
-          print('[SERIAL] WARNING: Not all bytes written!');
-        }
-        return false;
-      }
-      
-      return true;
+      return bytesWritten == data.length;
     } catch (e) {
-      if (kDebugMode) {
-        print('[SERIAL] TX error: $e');
-      }
       return false;
     }
   }
